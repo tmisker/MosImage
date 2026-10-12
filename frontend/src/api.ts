@@ -132,6 +132,8 @@ export interface DocumentRecord {
   can_redo: boolean;
   created_at: string;
   updated_at: string;
+  /** Only when a picture opened larger than the canvas allows: its size before it was scaled to fit. */
+  scaled_from?: { width: number; height: number } | null;
 }
 
 /** One image layer: centre in canvas pixels, scale (negative flips) and rotation in degrees. */

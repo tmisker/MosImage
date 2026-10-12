@@ -62,6 +62,14 @@ class ReferenceStorageTests(unittest.TestCase):
             self.assertFalse(stored.exists())
             self.assertIsNone(references.get_reference(created["id"]))
 
+    def test_large_photos_shrink_to_the_pixel_limit(self) -> None:
+        with isolated_data(), patch.object(references, "MAX_PIXELS", 1_000):
+            created = references.create_reference(new_document(), png(Image.new("RGB", (80, 40), "orange")), "Anna.jpg")
+            self.assertLessEqual(created["width"] * created["height"], 1_000)
+            self.assertAlmostEqual(created["width"] / created["height"], 2, delta=0.1)
+            with Image.open(references.original_image_path(created["id"])) as stored:
+                self.assertEqual(stored.size, (created["width"], created["height"]))
+
     def test_pasted_images_get_a_numbered_name_and_unknown_documents_are_rejected(self) -> None:
         with isolated_data():
             document_id = new_document()

@@ -138,9 +138,11 @@ def create_reference(document_id: int | None, content: bytes, filename: str | No
         # Normalize to PNG: browsers and the model see the same pixels, and
         # EXIF rotation from phone photos is applied once.
         with Image.open(BytesIO(content)) as uploaded:
-            if uploaded.width * uploaded.height > MAX_PIXELS:
-                raise ValueError("Reference images can be up to 16 megapixels")
             image = ImageOps.exif_transpose(uploaded).convert("RGBA" if "A" in uploaded.getbands() else "RGB")
+        if image.width * image.height > MAX_PIXELS:
+            # The model sees about a megapixel of a reference, so larger photos just shrink.
+            scale = (MAX_PIXELS / (image.width * image.height)) ** 0.5
+            image.thumbnail((int(image.width * scale), int(image.height * scale)), Image.Resampling.LANCZOS)
         image.save(path)
         with storage.connect() as db:
             cursor = db.execute(

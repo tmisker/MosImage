@@ -305,6 +305,8 @@ export default function App() {
     await adoptReferences(record.id);
     // The stored image, which phone photos reach turned upright, is the Background layer.
     stage(await blankPicture(record), record); await refresh();
+    const original = record.scaled_from;
+    if (original) setNotice(`Scaled down from ${original.width} × ${original.height} to ${record.canvas_width} × ${record.canvas_height} pixels, the largest size MosImage edits.`);
   }
   async function openSaved(record: DocumentRecord) {
     const current = await getDocument(record.id);

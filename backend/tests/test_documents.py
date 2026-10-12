@@ -6,10 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
 from PIL import Image
 
 from app import documents, storage
 from app.config import settings
+from app.main import app
 
 
 def png_bytes(color: tuple[int, int, int], size: tuple[int, int] = (96, 64)) -> bytes:
@@ -159,6 +161,36 @@ class DocumentPersistenceTests(unittest.TestCase):
         with Image.open(settings.data_dir / document["current_image_url"].replace("/files/", "")) as image:
             self.assertEqual(image.size, (64, 96))
             self.assertEqual(image.getexif().get(0x0112, 1), 1)
+
+    def test_pictures_larger_than_the_canvas_are_scaled_to_fit(self) -> None:
+        with patch.object(documents, "MAX_CANVAS", 48):
+            fitting = documents.create_from_upload("Small", png_bytes((10, 20, 30), (48, 32)), "small.png")
+            large = documents.create_from_upload("Large", png_bytes((10, 20, 30), (96, 64)), "large.png")
+            buffer = io.BytesIO()
+            exif = Image.Exif()
+            exif[0x0112] = 6
+            Image.new("RGB", (96, 64), (10, 20, 30)).save(buffer, "JPEG", exif=exif.tobytes(), icc_profile=b"display-p3")
+            phone = documents.create_from_upload("Phone", buffer.getvalue(), "phone.jpg")
+
+        self.assertNotIn("scaled_from", fitting)
+        self.assertEqual((large["canvas_width"], large["canvas_height"]), (48, 32))
+        self.assertEqual(large["scaled_from"], {"width": 96, "height": 64})
+        # Upright first, so the size reported is the one the user knows.
+        self.assertEqual((phone["canvas_width"], phone["canvas_height"]), (32, 48))
+        self.assertEqual(phone["scaled_from"], {"width": 64, "height": 96})
+        with Image.open(settings.data_dir / phone["current_image_url"].replace("/files/", "")) as image:
+            self.assertEqual(image.size, (32, 48))
+            self.assertEqual(image.getexif().get(0x0112, 1), 1)
+            self.assertEqual(image.info.get("icc_profile"), b"display-p3")
+        self.assertIsNone(documents.get_document(large["id"]).get("scaled_from"))
+
+    def test_the_api_reports_a_picture_scaled_to_fit(self) -> None:
+        with patch.object(documents, "MAX_CANVAS", 48):
+            response = TestClient(app).post("/api/v2/documents", files={"image": ("large.png", png_bytes((10, 20, 30)), "image/png")})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["scaled_from"], {"width": 96, "height": 64})
+        self.assertEqual((response.json()["canvas_width"], response.json()["canvas_height"]), (48, 32))
 
     def test_delete_document_removes_records_and_files(self) -> None:
         document = documents.create_from_upload("ToDelete", png_bytes((10, 10, 10)), "delete.png")

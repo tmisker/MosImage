@@ -388,6 +388,11 @@ class RevisionRecord(BaseModel):
     layers: list[LayerRecord] = Field(default_factory=list)
 
 
+class PictureSize(BaseModel):
+    width: int
+    height: int
+
+
 class DocumentRecord(BaseModel):
     id: int
     name: str
@@ -402,6 +407,8 @@ class DocumentRecord(BaseModel):
     can_redo: bool
     created_at: datetime
     updated_at: datetime
+    # Only when a picture opened larger than the canvas allows: its size before it was scaled to fit.
+    scaled_from: PictureSize | None = None
 
 
 class EngineStatus(BaseModel):

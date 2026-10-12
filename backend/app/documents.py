@@ -103,7 +103,7 @@ def ensure_document_storage() -> None:
 
 
 def create_from_upload(name: str, content: bytes, filename: str | None) -> dict[str, Any]:
-    path = _save_document_image(content, filename)
+    path, arrived = _save_document_image(content, filename)
     try:
         width, height = _image_size(path)
         with storage.connect() as db:
@@ -125,10 +125,13 @@ def create_from_upload(name: str, content: bytes, filename: str | None) -> dict[
             )
             _set_current_revision(db, document_id, revision_id)
             db.commit()
-        return get_document(document_id) or _missing_document(document_id)
+        record = get_document(document_id) or _missing_document(document_id)
     except BaseException:
         path.unlink(missing_ok=True)
         raise
+    if arrived != (width, height):
+        record["scaled_from"] = {"width": arrived[0], "height": arrived[1]}
+    return record
 
 
 def import_generation(generation_id: int, name: str | None = None) -> dict[str, Any]:
@@ -670,29 +673,48 @@ def _set_current_revision(db: Connection, document_id: int, revision_id: int) ->
     )
 
 
-def _save_document_image(content: bytes, filename: str | None) -> Path:
+def _save_document_image(content: bytes, filename: str | None) -> tuple[Path, tuple[int, int]]:
+    """Stores an opened picture; returns its path and the upright size it arrived at."""
     suffix = _safe_suffix(filename)
     path = settings.document_dir / f"document-{uuid4().hex}{suffix}"
     path.write_bytes(content)
     try:
         _image_size(path)
-        _apply_orientation(path)
+        arrived = _fit_upright(path)
     except BaseException:
         path.unlink(missing_ok=True)
         raise
-    return path
+    return path, arrived
 
 
-def _apply_orientation(path: Path) -> None:
-    """Turns phone photos upright once, as browsers show them, so every tool sees the same pixels."""
+def _fit_upright(path: Path) -> tuple[int, int]:
+    """Turns phone photos upright, as browsers show them, and scales pictures larger
+    than the canvas down to fit, once, so every tool sees the same pixels.
+
+    Returns the upright size before scaling.
+    """
     with Image.open(path) as image:
-        if image.getexif().get(0x0112, 1) == 1:
-            return
+        if image.getexif().get(0x0112, 1) == 1 and max(image.size) <= MAX_CANVAS:
+            return image.size
         upright = ImageOps.exif_transpose(image)
+        arrived = upright.size
+        if max(arrived) > MAX_CANVAS:
+            # Palette images would otherwise shrink with nearest-neighbour sampling.
+            if upright.mode in {"1", "P"}:
+                upright = upright.convert("RGBA" if upright.has_transparency_data else "RGB")
+            upright.thumbnail((MAX_CANVAS, MAX_CANVAS), Image.Resampling.LANCZOS)
         exif = upright.getexif()
         exif.pop(0x0112, None)
-        options = {"quality": 95, "exif": exif.tobytes()} if image.format == "JPEG" else {}
+        options: dict[str, Any] = {
+            "JPEG": {"quality": 95, "exif": exif.tobytes()},
+            "WEBP": {"quality": 95},
+            "PNG": FAST_PNG,
+        }.get(image.format or "PNG", {})
+        # Phone photos often carry Display P3; without the profile their colours go flat.
+        if image.info.get("icc_profile"):
+            options = {**options, "icc_profile": image.info["icc_profile"]}
         upright.save(path, image.format or "PNG", **options)
+    return arrived
 
 
 def _save_revision_image(content: bytes, filename: str | None, prefix: str) -> Path:
