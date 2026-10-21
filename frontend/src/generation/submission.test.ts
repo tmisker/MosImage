@@ -72,6 +72,13 @@ describe("submitJob", () => {
     expect(whole.extras.result?.kind).toBe("generation");
     await expect(submitJob(input({ operation: "sketch", sketch: new Blob([]) }))).rejects.toThrow("Sketch something first");
   });
+  it("sends the picked references with a sketch in either scope", async () => {
+    const sketch = new Blob(["strokes"]);
+    await submitJob(input({ operation: "sketch", sketch, referenceIds: [5, 6] }));
+    expect(sentForm().getAll("reference_ids")).toEqual(["5", "6"]);
+    await submitJob(input({ operation: "sketch", sketch, sketchScope: "whole", referenceIds: [5] }));
+    expect(vi.mocked(editWholeImage).mock.calls[0][1]).toMatchObject({ mode: "sketch", reference_ids: [5] });
+  });
   it("limits fixed faces to the selection", async () => {
     const mask = new Blob(["faces"]);
     const submission = await submitJob(input({ operation: "faces", mask, referenceIds: [7] }));
@@ -115,10 +122,10 @@ describe("submitJob", () => {
     expect(inDocument.extras.result?.kind).toBe("generation");
     expect(vi.mocked(generateImage).mock.calls[0][0]).toMatchObject({ width: 1024, height: 1024, reference_ids: [5] });
   });
-  it("needs a layer for a layer edit", async () => {
+  it("needs a layer for a layer edit and enables diffMask for whole-picture edits", async () => {
     await expect(submitJob(input({ operation: "edit", editScope: "layer" }))).rejects.toThrow("Pick the layer");
     const whole = await submitJob(input({ operation: "edit" }));
-    expect(whole.extras.result?.kind).toBe("generation");
+    expect(whole.extras.result).toEqual({ kind: "generation", name: "AI · a red hat", diffMask: true });
   });
   it("expands the picture as you see it and moves layers along", async () => {
     const visible = new File(["with layers"], "picture.png");

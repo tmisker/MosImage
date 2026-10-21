@@ -44,7 +44,7 @@ Three steps on one picture, each about 3–10 seconds on an RTX 5070 Ti (7–15 
 **Create**
 - **Generate** an image from a prompt. In an open document the result is added as a new layer.
 - **References**: put people, pets or objects from your own photos into a new scene ("Anna and Tom riding a roller coaster"), up to three at once.
-- **Sketch** rough coloured strokes and describe them. MosImage renders just the sketch, or the whole picture around it.
+- **Sketch** rough coloured strokes and describe them. MosImage renders just the sketch, or the whole picture around it. With references picked, the sketch places and poses them.
 
 **Edit**
 - **Replace** or **Remove** a selected area. Pixels outside the selection stay exact.
@@ -124,7 +124,7 @@ cd frontend
 npm run tauri:build
 ```
 
-This builds `frontend/src-tauri/target/release/mosimage.exe` plus MSI and NSIS installers. The app starts and stops the engine itself, or reuses one that `start.cmd` already started. Close a running `mosimage.exe` before rebuilding, because Windows locks the file.
+This builds `frontend/src-tauri/target/release/mosimage.exe` in a few seconds after the first build; `npm run tauri:installers` also makes MSI and NSIS installers. The app starts and stops the engine itself, or reuses one that `start.cmd` already started. Close a running `mosimage.exe` before rebuilding, because Windows locks the file.
 
 On a Mac, after `./start.sh` has set up the engine once:
 

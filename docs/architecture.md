@@ -1,7 +1,7 @@
 # Architecture
 
 Status: Current reference
-Last verified: 2026-10-11
+Last verified: 2026-10-17
 
 MosImage is two local processes: a FastAPI engine that owns the models, the job queue and all files, and a React UI that talks to it over HTTP on `127.0.0.1:8000`. The optional Tauri shell starts the engine itself and shows the same UI in a desktop window.
 
@@ -32,14 +32,14 @@ MosImage is two local processes: a FastAPI engine that owns the models, the job 
 | `selection.py` | `/api` | point selection, select by text, subject cut-out |
 | `jobs.py` | `/api/jobs` | job status and cancellation |
 | `documents.py` | `/api/v2` | documents, revisions, layer assets, layers, AI alternatives, undo/redo |
-| `references.py` | `/api/v2` | loose and per-document references, subject isolation |
+| `references.py` | `/api/v2` | loose and per-document references, subject isolation, name and role (`PATCH /references/{id}`) |
 | `common.py` | | shared helpers: bounded upload reads, parameter parsing, capability and reference checks, `http_errors()` for mapping exceptions to status codes |
 
 `main.py` keeps only the app setup: CORS, static file serving for `/files/images/`, health, system info, engine warm-up, model load/unload and shutdown.
 
 ### Jobs
 
-`jobs.py` runs two single-worker lanes: one for GPU work (generation and editing) and one for CPU work (SAM selection, Grounding DINO, ViTMatte). Selecting therefore never waits behind a render. Each job gets a `JobControl` for progress and cooperative cancellation. Finished jobs are retained for `MOSIMAGE_JOB_RETENTION_SECONDS`. Under `start.cmd`, `start.sh` or the desktop app, a supervisor restarts the engine when a cancelled GPU call does not yield within eight seconds.
+`jobs.py` runs two single-worker lanes: one for GPU work (generation and editing) and one for CPU work (SAM selection, Grounding DINO, ViTMatte). Selecting therefore never waits behind a render. Each job gets a `JobControl` for progress and cooperative cancellation; `subrange` hands a step its share of the bar, so model loads report as they go (the 9B text encoder per weight, the transformer per block on its way to the GPU). Finished jobs are retained for `MOSIMAGE_JOB_RETENTION_SECONDS`. Under `start.cmd`, `start.sh` or the desktop app, a supervisor restarts the engine when a cancelled GPU call does not yield within eight seconds.
 
 ### Model providers (`models/`)
 
@@ -83,7 +83,7 @@ Optional Fine detail sends the contextual selected crop through `provider.edit` 
 - `storage.py` runs SQLite with WAL and named migrations, and records generation history.
 - `documents.py` stores documents, revisions, AI alternatives, undo and redo. A stale base revision raises `RevisionConflict`, which the API returns as HTTP 409.
 - `layers.py` stores layer images (RGBA PNG) and masks (greyscale PNG). The opened picture is the bottom layer, `background`, which points at the document image itself; `revisions.composite_image_path` remains the canvas image that sets the size and the library thumbnail. An AI layer that replaced another keeps its `original_id`. A switched-off mask is kept with `mask_enabled: false`; stacks saved before that flag existed load with their masks on. A layer can hold up to eight same-sized `variant_paths`, the AI proposals it was applied with; `image_path` is the one shown and the others stay on disk until the document goes.
-- `references.py` stores reference images and their optional isolated subjects.
+- `references.py` stores reference images, their optional isolated subjects and their role (subject, clothing, pose or style), which the Klein prompts turn into a sentence per reference.
 
 All files live under `data/`. Only `data/images/` is served over HTTP.
 
@@ -94,12 +94,13 @@ All files live under `data/`. Only `data/images/` is served over HTTP.
 | Folder | Contents |
 |---|---|
 | `api.ts` | Typed client for every endpoint |
+| `engineStartup.ts`, `splash.ts` | Engine start: retrying until the engine answers and the failure text, and handing `index.html`'s loading logo to the startup screen |
 | `hooks/` | State and side effects: engine connection and warm-up (`useEngine`), job submission and polling (`useJobRunner`), the visible picture and exports (`usePicture`), selection tools (`useSelectionTools`), layers, references, result preview and keyboard/paste handling |
 | `generation/` | Pure logic: what a command submits (`submission.ts`), when it can run and what the hint says (`commandState.ts`), operations, presets, aspect ratios and progress text |
 | `canvas/` | Editor canvas, viewport, mask and sketch layers, crop and expansion canvases, selection and mask-brush bars |
 | `layers/` | Layer stack, transform geometry, bitmap helpers (mask display, selection to layer mask) and the soft mask brush (`brush.ts`) |
 | `masks/` | Mask operations and refinement. The signed distance field for soft edges runs in a Web Worker (`maskWorker.ts` via `fieldWorker.ts`), with a synchronous fallback |
-| `components/` | Panels, dialogs, top bar, tool rail, proposal tray and library |
+| `components/` | Panels, dialogs, top bar, tool rail, proposal tray, library and the startup screen |
 
 Most of the logic in `generation/`, `masks/` and `layers/` is pure and covered by Vitest tests next to each module.
 
@@ -107,4 +108,4 @@ The UI runs in Chromium (WebView2 on Windows) and in WebKit (Safari, and the mac
 
 ## Desktop shell (`frontend/src-tauri/`)
 
-The Tauri app starts the engine from `backend/.venv` without a console window and logs to `data/logs/engine.log`. If an engine is already running on port 8000, the app reuses it. It restarts the engine after a crash or hard cancel. On close it shuts the engine down through `/api/shutdown`, using a per-launch token. A Windows job object also ends the engine if the app itself crashes; on macOS and Linux the engine watches its parent process (`MOSIMAGE_EXIT_WITH_PARENT`) and exits once it is gone.
+The Tauri app starts the engine from `backend/.venv` without a console window and logs to `data/logs/engine.log`. Its window opens in the app's background colour, set in both `tauri.conf.json` and `tauri.windows.conf.json` because the Windows file replaces the window list. If an engine is already running on port 8000, the app reuses it. It restarts the engine after a crash or hard cancel. On close it shuts the engine down through `/api/shutdown`, using a per-launch token. A Windows job object also ends the engine if the app itself crashes; on macOS and Linux the engine watches its parent process (`MOSIMAGE_EXIT_WITH_PARENT`) and exits once it is gone.
